@@ -1,19 +1,17 @@
 """
 Demo FastAPI service for an AI-agent deployment-recovery presentation.
 
-APP_VERSION=v1 → /health returns 200 (healthy)
-APP_VERSION=v2 → /health returns 500 (simulated bad deployment)
-Other endpoints keep working in both versions.
+/health is healthy on main. To simulate a bad deploy, uncomment the
+broken block in health() and comment out the healthy return.
 """
 
-import os
 from typing import List
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-APP_VERSION = os.getenv("APP_VERSION", "v1")
+APP_VERSION = "v1"
 
 app = FastAPI(
     title="Deployment Recovery Demo API",
@@ -81,23 +79,19 @@ _next_order_id = 4
 
 @app.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
 def health():
-    """
-    Health check used by deployment / recovery demos.
-
-    APP_VERSION=v2 intentionally fails so agents can detect and roll back
-    a bad deploy (a new process started with APP_VERSION=v1).
-    """
-    if APP_VERSION == "v2":
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "status": "unhealthy",
-                "version": "v2",
-                "reason": "simulated deployment failure",
-            },
-        )
-
+    """Health check used by deployment / recovery demos."""
+    # --- HEALTHY (active on main) ---
     return {"status": "healthy", "version": APP_VERSION}
+
+    # --- BROKEN (uncomment for bad-deploy demo; comment out the healthy return above) ---
+    # return JSONResponse(
+    #     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    #     content={
+    #         "status": "unhealthy",
+    #         "version": "broken",
+    #         "reason": "simulated deployment failure",
+    #     },
+    # )
 
 
 @app.get("/version", response_model=VersionResponse)
