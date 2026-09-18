@@ -81,17 +81,17 @@ _next_order_id = 4
 def health():
     """Health check used by deployment / recovery demos."""
     # --- HEALTHY (active on main) ---
-    return {"status": "healthy", "version": APP_VERSION}
+    # return {"status": "healthy", "version": APP_VERSION}
 
     # --- BROKEN (uncomment for bad-deploy demo; comment out the healthy return above) ---
-    # return JSONResponse(
-    #     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    #     content={
-    #         "status": "unhealthy",
-    #         "version": "broken",
-    #         "reason": "simulated deployment failure",
-    #     },
-    # )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "status": "unhealthy",
+            "version": "broken",
+            "reason": "simulated deployment failure",
+        },
+    )
 
 
 @app.get("/version", response_model=VersionResponse)
