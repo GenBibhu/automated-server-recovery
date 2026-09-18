@@ -13,7 +13,7 @@ Version is controlled by the `APP_VERSION` environment variable (default
 
 - [uv](https://docs.astral.sh/uv/)
 - Python 3.10+ (uv will fetch one if needed)
-- Docker (optional, for container runs)
+- Docker (optional)
 
 ## 1. Install dependencies
 
