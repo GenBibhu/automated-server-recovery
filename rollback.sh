@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
+# Verify recovery after rolling back to APP_VERSION=v1 (new process).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE_FILE="${ROOT}/deployment_state.txt"
-
 echo "Rollback started"
-
-printf 'v1\n' > "${STATE_FILE}"
-echo "Wrote v1 to deployment_state.txt"
+echo "Start or replace the server with: APP_VERSION=v1 ./uvw run uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 echo "Health verification: calling GET /health ..."
 HEALTH="$(curl -fsS http://localhost:8000/health)"

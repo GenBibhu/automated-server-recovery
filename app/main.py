@@ -1,40 +1,25 @@
 """
 Demo FastAPI service for an AI-agent deployment-recovery presentation.
 
-Current deployment version is read from deployment_state.txt on each
-request so the demo can switch v1 ↔ v2 without restarting Uvicorn.
-
-v1 → /health returns 200 (healthy)
-v2 → /health returns 500 (simulated bad deployment)
+APP_VERSION=v1 → /health returns 200 (healthy)
+APP_VERSION=v2 → /health returns 500 (simulated bad deployment)
 Other endpoints keep working in both versions.
 """
 
-from pathlib import Path
+import os
 from typing import List
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-# Project-root state file; edited live during the recovery demo.
-STATE_FILE = Path(__file__).resolve().parent.parent / "deployment_state.txt"
+APP_VERSION = os.getenv("APP_VERSION", "v1")
 
 app = FastAPI(
     title="Deployment Recovery Demo API",
     description="Small demo service used to simulate healthy vs failed deployments.",
-    version="1.0.0",
+    version=APP_VERSION,
 )
-
-
-def get_deployment_version() -> str:
-    """Read the live deployment version from disk (no process restart needed)."""
-    try:
-        if not STATE_FILE.is_file():
-            return "v1"
-        version = STATE_FILE.read_text(encoding="utf-8").strip()
-        return version or "v1"
-    except OSError:
-        return "v1"
 
 
 # ---------------------------------------------------------------------------
@@ -99,12 +84,10 @@ def health():
     """
     Health check used by deployment / recovery demos.
 
-    When deployment_state.txt is v2, this intentionally fails so agents
-    can detect and roll back a bad deploy — without restarting Uvicorn.
+    APP_VERSION=v2 intentionally fails so agents can detect and roll back
+    a bad deploy (a new process started with APP_VERSION=v1).
     """
-    version = get_deployment_version()
-
-    if version == "v2":
+    if APP_VERSION == "v2":
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
@@ -114,12 +97,12 @@ def health():
             },
         )
 
-    return {"status": "healthy", "version": version}
+    return {"status": "healthy", "version": APP_VERSION}
 
 
 @app.get("/version", response_model=VersionResponse)
 def version():
-    return {"version": get_deployment_version()}
+    return {"version": APP_VERSION}
 
 
 @app.get("/api/users", response_model=List[User])

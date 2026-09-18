@@ -5,9 +5,9 @@ Small FastAPI service used to demonstrate AI-agent deployment recovery.
 - **v1** — healthy deployment (`GET /health` → HTTP 200)
 - **v2** — intentionally unhealthy deployment (`GET /health` → HTTP 500)
 
-The live deployment version is stored in `deployment_state.txt` at the
-project root. Change that file while Uvicorn keeps running — no process
-restart is required. Other API endpoints continue to work in both versions.
+Version is controlled by the `APP_VERSION` environment variable (default
+`v1`). A new deployment starts a new process with a different
+`APP_VERSION`. Other API endpoints continue to work in both versions.
 
 ## Requirements
 
@@ -32,20 +32,41 @@ If you still have leftover local envs from earlier setup:
 rm -rf venv .venv
 ```
 
-## 2. Run locally
+## 2. Run locally (default = v1)
 
 ```bash
 ./uvw run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-`deployment_state.txt` starts as `v1` (healthy).
-
-## 3. Simulate a bad deployment (v2) — no restart
-
-While the server is still running:
+## 3. Run v1 (healthy)
 
 ```bash
-echo v2 > deployment_state.txt
+APP_VERSION=v1 ./uvw run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+## 4. Run v2 (simulated failure)
+
+```bash
+APP_VERSION=v2 ./uvw run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+## 5. Test `/health`
+
+Healthy (v1):
+
+```bash
+curl -i http://127.0.0.1:8000/health
+```
+
+Expected:
+
+```json
+{"status":"healthy","version":"v1"}
+```
+
+Unhealthy (v2):
+
+```bash
 curl -i http://127.0.0.1:8000/health
 ```
 
@@ -55,23 +76,9 @@ Expected HTTP 500:
 {"status":"unhealthy","version":"v2","reason":"simulated deployment failure"}
 ```
 
-## 4. Roll back to a healthy deployment (v1) — no restart
+Other useful checks:
 
 ```bash
-echo v1 > deployment_state.txt
-curl -i http://127.0.0.1:8000/health
-```
-
-Expected HTTP 200:
-
-```json
-{"status":"healthy","version":"v1"}
-```
-
-## 5. Test `/health` and other endpoints
-
-```bash
-curl -i http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/version
 curl http://127.0.0.1:8000/api/users
 curl http://127.0.0.1:8000/api/orders
@@ -85,34 +92,38 @@ docker build -t recovery-demo-api .
 
 ## 7. Run the Docker container
 
+v1 (healthy):
+
 ```bash
-docker run --rm -p 8000:8000 recovery-demo-api
+docker run --rm -p 8000:8000 -e APP_VERSION=v1 recovery-demo-api
+```
+
+v2 (simulated failure):
+
+```bash
+docker run --rm -p 8000:8000 -e APP_VERSION=v2 recovery-demo-api
 ```
 
 Custom port:
 
 ```bash
-docker run --rm -p 9000:9000 -e PORT=9000 recovery-demo-api
+docker run --rm -p 9000:9000 -e PORT=9000 -e APP_VERSION=v1 recovery-demo-api
 ```
-
-To simulate deploy/rollback inside a container, mount or rewrite
-`deployment_state.txt` the same way as locally.
 
 ## 8. Why v2 fails `/health`
 
-Writing `v2` into `deployment_state.txt` makes `/health` return HTTP 500
-with a simulated deployment failure. Business endpoints (`/api/users`,
-`/api/orders`, etc.) still respond normally. That split lets an agent
-detect an unhealthy deploy and trigger recovery (for example by writing
-`v1` back) while the rest of the API remains observable — all without
-restarting Uvicorn.
+`APP_VERSION=v2` makes `/health` return HTTP 500 with a simulated
+deployment failure. Business endpoints (`/api/users`, `/api/orders`, etc.)
+still respond normally. That split lets an agent detect an unhealthy
+deploy and trigger recovery by starting a new process with
+`APP_VERSION=v1`.
 
 ## API overview
 
 | Method | Path              | Description                          |
 |--------|-------------------|--------------------------------------|
 | GET    | `/health`         | Health check (fails only in v2)      |
-| GET    | `/version`        | Current version from state file      |
+| GET    | `/version`        | Current `APP_VERSION`                |
 | GET    | `/api/users`      | List users                           |
 | GET    | `/api/users/{id}` | Get one user                         |
 | GET    | `/api/orders`     | List orders                          |
