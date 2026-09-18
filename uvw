@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# uv wrapper that keeps the project virtualenv outside this repo.
+set -euo pipefail
+export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-${XDG_CACHE_HOME:-$HOME/.cache}/uv/envs/automated-server-recovery}"
+exec uv "$@"

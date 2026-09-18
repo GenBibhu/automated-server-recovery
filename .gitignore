@@ -1,0 +1,13 @@
+# Virtualenvs live outside this repo (./uvw sets UV_PROJECT_ENVIRONMENT).
+# Ignore leftovers if someone creates one locally by mistake.
+.venv/
+venv/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.env
+.env.local
+.env.*.local

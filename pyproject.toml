@@ -1,0 +1,14 @@
+[project]
+name = "recovery-demo-api"
+version = "1.0.0"
+description = "FastAPI demo service for AI-agent deployment-recovery demos"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.10.0",
+]
+
+[tool.uv]
+package = false
