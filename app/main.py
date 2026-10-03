@@ -5,12 +5,15 @@ Demo FastAPI service for an AI-agent deployment-recovery presentation.
 broken block in health() and comment out the healthy return.
 """
 
+import math
 import os
 import secrets
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -21,6 +24,31 @@ app = FastAPI(
     description="Small demo service used to simulate healthy vs failed deployments.",
     version=APP_VERSION,
 )
+
+
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats so validation errors can be returned as JSON."""
+    if isinstance(value, float) and not math.isfinite(value):
+        if math.isnan(value):
+            return "NaN"
+        return "Infinity" if value > 0 else "-Infinity"
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    # Pydantic includes the raw input in the error. Infinity/NaN cannot be
+    # encoded by JSONResponse and would otherwise turn a 422 into a 500.
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": _json_safe(jsonable_encoder(exc.errors()))},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -53,8 +81,8 @@ class Order(BaseModel):
 
 class OrderCreate(BaseModel):
     user_id: int = Field(..., gt=0, description="ID of the user placing the order")
-    product: str = Field(..., min_length=1)
-    amount: float = Field(..., gt=0)
+    product: str = Field(..., min_length=1, max_length=200)
+    amount: float = Field(..., gt=0, allow_inf_nan=False)
     discount_percent: float = Field(
         0,
         ge=0,
@@ -65,7 +93,7 @@ class OrderCreate(BaseModel):
 
 class OrderUpdate(BaseModel):
     status: Optional[OrderStatus] = None
-    amount: Optional[float] = Field(None, gt=0)
+    amount: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
 
 
 class HealthResponse(BaseModel):
@@ -114,7 +142,7 @@ def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
             detail="Admin authentication is not configured",
         )
     provided = x_admin_token or ""
-    if not secrets.compare_digest(provided, expected):
+    if not secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing admin token",

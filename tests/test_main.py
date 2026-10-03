@@ -216,6 +216,48 @@ def test_create_order_validation(client, payload):
     assert [order.id for order in main.ORDERS] == [1, 2, 3]
 
 
+@pytest.mark.parametrize(
+    "amount_literal",
+    ["Infinity", "-Infinity", "NaN"],
+)
+def test_create_and_patch_reject_non_finite_amounts(client, amount_literal):
+    # httpx refuses non-finite floats, so send the JSON tokens the server accepts.
+    created = client.post(
+        "/api/orders",
+        content=f'{{"user_id": 1, "product": "Mouse", "amount": {amount_literal}}}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert created.status_code == 422
+    assert [order.id for order in main.ORDERS] == [1, 2, 3]
+
+    patched = client.patch(
+        "/api/orders/1",
+        content=f'{{"amount": {amount_literal}}}',
+        headers={**AUTH, "Content-Type": "application/json"},
+    )
+    assert patched.status_code == 422
+    assert main.ORDERS[0].amount == 1299.99
+
+
+def test_non_ascii_admin_token_returns_401(client):
+    # Header values are latin-1 on the wire; httpx will not encode a non-ASCII str.
+    response = client.get(
+        "/api/admin/dump",
+        headers={"X-Admin-Token": "tökën".encode("latin-1")},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid or missing admin token"
+
+
+def test_product_longer_than_200_is_rejected(client):
+    response = client.post(
+        "/api/orders",
+        json={"user_id": 1, "product": "x" * 201, "amount": 10},
+    )
+    assert response.status_code == 422
+    assert [order.id for order in main.ORDERS] == [1, 2, 3]
+
+
 def test_patch_and_delete_require_auth_and_mutate_the_right_order(client):
     unauth_patch = client.patch("/api/orders/1", json={"status": "paid", "amount": 10})
     assert unauth_patch.status_code == 401
