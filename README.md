@@ -130,6 +130,8 @@ deploy and trigger recovery by starting a new process with
 | GET    | `/api/orders/{id}`| Get one order                        |
 | POST   | `/api/orders`     | Create an order                      |
 
+Set `ADMIN_TOKEN` in the environment before using the admin routes. If it is unset or empty, those routes return 503. `PATCH /api/orders/{id}`, `DELETE /api/orders/{id}`, and `GET /api/admin/dump` require an `X-Admin-Token` header.
+
 Create order example:
 
 ```bash

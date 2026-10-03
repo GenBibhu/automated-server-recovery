@@ -5,9 +5,15 @@ Demo FastAPI service for an AI-agent deployment-recovery presentation.
 broken block in health() and comment out the healthy return.
 """
 
-from typing import List
+import math
+import os
+import secrets
+from enum import Enum
+from typing import Any, List, Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -20,9 +26,44 @@ app = FastAPI(
 )
 
 
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats so validation errors can be returned as JSON."""
+    if isinstance(value, float) and not math.isfinite(value):
+        if math.isnan(value):
+            return "NaN"
+        return "Infinity" if value > 0 else "-Infinity"
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    # Pydantic includes the raw input in the error. Infinity/NaN cannot be
+    # encoded by JSONResponse and would otherwise turn a 422 into a 500.
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _json_safe(jsonable_encoder(exc.errors()))},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
+class OrderStatus(str, Enum):
+    """Allowed order statuses. Existing records use pending/shipped/delivered."""
+
+    pending = "pending"
+    paid = "paid"
+    shipped = "shipped"
+    delivered = "delivered"
+    cancelled = "cancelled"
+
 
 class User(BaseModel):
     id: int
@@ -40,8 +81,19 @@ class Order(BaseModel):
 
 class OrderCreate(BaseModel):
     user_id: int = Field(..., gt=0, description="ID of the user placing the order")
-    product: str = Field(..., min_length=1)
-    amount: float = Field(..., gt=0)
+    product: str = Field(..., min_length=1, max_length=200)
+    amount: float = Field(..., gt=0, allow_inf_nan=False)
+    discount_percent: float = Field(
+        0,
+        ge=0,
+        le=100,
+        description="Optional percent discount",
+    )
+
+
+class OrderUpdate(BaseModel):
+    status: Optional[OrderStatus] = None
+    amount: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
 
 
 class HealthResponse(BaseModel):
@@ -71,6 +123,30 @@ ORDERS: List[Order] = [
 ]
 
 _next_order_id = 4
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
+    """Authorize admin routes with ADMIN_TOKEN from the environment.
+
+    The token is read on each request. Access is denied when the variable is
+    unset or empty, and the configured value is never included in a response.
+    """
+    expected = os.environ.get("ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin authentication is not configured",
+        )
+    provided = x_admin_token or ""
+    if not secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing admin token",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +189,16 @@ def get_user(user_id: int):
 
 
 @app.get("/api/orders", response_model=List[Order])
-def list_orders():
-    return ORDERS
+def list_orders(
+    user_id: Optional[int] = Query(None, description="Filter orders by user"),
+    status_filter: Optional[OrderStatus] = Query(None, alias="status"),
+):
+    results = list(ORDERS)
+    if user_id is not None:
+        results = [order for order in results if order.user_id == user_id]
+    if status_filter is not None:
+        results = [order for order in results if order.status == status_filter.value]
+    return results
 
 
 @app.get("/api/orders/{order_id}", response_model=Order)
@@ -129,20 +213,72 @@ def get_order(order_id: int):
 def create_order(payload: OrderCreate):
     global _next_order_id
 
-    # Ensure the referenced user exists (keeps the demo data consistent).
     if not any(user.id == payload.user_id for user in USERS):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {payload.user_id} not found",
         )
 
+    final_amount = payload.amount * (1 - payload.discount_percent / 100)
+    if final_amount <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Final amount must be greater than 0",
+        )
+
     order = Order(
         id=_next_order_id,
         user_id=payload.user_id,
         product=payload.product,
-        amount=payload.amount,
-        status="pending",
+        amount=final_amount,
+        status=OrderStatus.pending.value,
     )
     _next_order_id += 1
     ORDERS.append(order)
     return order
+
+
+@app.patch(
+    "/api/orders/{order_id}",
+    response_model=Order,
+    dependencies=[Depends(require_admin)],
+)
+def update_order(order_id: int, payload: OrderUpdate):
+    for order in ORDERS:
+        if order.id == order_id:
+            if payload.status is not None:
+                order.status = payload.status.value
+            if payload.amount is not None:
+                order.amount = payload.amount
+            return order
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+
+@app.delete(
+    "/api/orders/{order_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_admin)],
+)
+def delete_order(order_id: int):
+    for index, order in enumerate(ORDERS):
+        if order.id == order_id:
+            ORDERS.pop(index)
+            return
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+
+@app.get("/api/admin/dump", dependencies=[Depends(require_admin)])
+def admin_dump():
+    """Return full in-memory state for debugging."""
+    return {
+        "users": [user.model_dump() for user in USERS],
+        "orders": [order.model_dump() for order in ORDERS],
+        "next_order_id": _next_order_id,
+    }
+
+
+@app.get("/api/search", response_model=List[User])
+def search(q: str = Query(...)):
+    """Search users by case-insensitive substring match on name."""
+    needle = q.casefold()
+    return [user for user in USERS if needle in user.name.casefold()]
