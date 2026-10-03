@@ -46,7 +46,7 @@ async def request_validation_exception_handler(
     # Pydantic includes the raw input in the error. Infinity/NaN cannot be
     # encoded by JSONResponse and would otherwise turn a 422 into a 500.
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=422,
         content={"detail": _json_safe(jsonable_encoder(exc.errors()))},
     )
 
@@ -222,7 +222,7 @@ def create_order(payload: OrderCreate):
     final_amount = payload.amount * (1 - payload.discount_percent / 100)
     if final_amount <= 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             detail="Final amount must be greater than 0",
         )
 
