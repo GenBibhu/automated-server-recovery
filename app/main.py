@@ -194,7 +194,7 @@ def create_order(payload: OrderCreate):
     final_amount = payload.amount * (1 - payload.discount_percent / 100)
     if final_amount <= 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Final amount must be greater than 0",
         )
 
